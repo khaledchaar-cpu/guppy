@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-10-15
 
 ### Added
 - Key bar along the bottom edge: the most used keys as buttons, each with what it does and
@@ -61,6 +61,7 @@ First public release.
 - Looks: `paper` (follows the Omarchy theme), `matte-black` and `neon`
 - Builds for Linux, Windows and macOS; downloads for all three on the release page
 
+[0.4.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/khaledchaar-cpu/guppy/releases/tag/v0.1.0
