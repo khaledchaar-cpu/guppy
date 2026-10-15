@@ -384,6 +384,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("Network drives", "Parallel accesses"),
     ("Startup", "Show key help"),
     ("Appearance", "Look"),
+    ("Appearance", "Key bar at the bottom"),
 ];
 
 /// Rows 7 and 8 hold paths and are edited as text.
@@ -406,7 +407,8 @@ fn setting_value(c: &Config, row: usize) -> String {
         8 => path(&c.start.right),
         9 => c.network.threads.to_string(),
         10 => on(c.start.help),
-        _ => c.view.look.name().to_string(),
+        11 => c.view.look.name().to_string(),
+        _ => on(c.view.keybar),
     }
 }
 
@@ -428,6 +430,7 @@ fn setting_step(c: &mut Config, row: usize, dir: i32) {
         9 => c.network.threads = (c.network.threads as i32 + dir).clamp(1, 32) as usize,
         10 => flip(&mut c.start.help),
         11 => c.view.look = c.view.look.step(dir),
+        12 => flip(&mut c.view.keybar),
         _ => {}
     }
 }
@@ -3211,7 +3214,9 @@ impl Guppy {
                 background: Some(rgb(t.dark_background).into()),
                 ..Default::default()
             });
-        let main: Element<'_, Message> = column![self.menubar(), desk, self.statusbar(), self.keybar()].into();
+        let main: Element<'_, Message> = column![self.menubar(), desk, self.statusbar()]
+            .push(self.config.view.keybar.then(|| self.keybar()))
+            .into();
         let main = match self.drag.as_ref().filter(|d| d.active) {
             Some(d) => {
                 let grab = mouse_area(main).interaction(iced::mouse::Interaction::Grabbing);
