@@ -105,6 +105,8 @@ fn rgb(c: u32) -> Color {
 #[derive(Debug, Clone)]
 enum Message {
     Key(keyboard::Event),
+    /// Click on a button in the key bar: acts like pressing that key.
+    KeyBar(Key, keyboard::Modifiers),
     Select(usize, usize),
     /// Click on a tab: side, position.
     TabClick(usize, usize),
@@ -382,6 +384,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("Network drives", "Parallel accesses"),
     ("Startup", "Show key help"),
     ("Appearance", "Look"),
+    ("Appearance", "Key bar at the bottom"),
 ];
 
 /// Rows 7 and 8 hold paths and are edited as text.
@@ -404,7 +407,8 @@ fn setting_value(c: &Config, row: usize) -> String {
         8 => path(&c.start.right),
         9 => c.network.threads.to_string(),
         10 => on(c.start.help),
-        _ => c.view.look.name().to_string(),
+        11 => c.view.look.name().to_string(),
+        _ => on(c.view.keybar),
     }
 }
 
@@ -426,6 +430,7 @@ fn setting_step(c: &mut Config, row: usize, dir: i32) {
         9 => c.network.threads = (c.network.threads as i32 + dir).clamp(1, 32) as usize,
         10 => flip(&mut c.start.help),
         11 => c.view.look = c.view.look.step(dir),
+        12 => flip(&mut c.view.keybar),
         _ => {}
     }
 }
@@ -1304,6 +1309,7 @@ impl Guppy {
             Message::Key(keyboard::Event::KeyPressed { key, modifiers, text, .. }) => {
                 return self.on_key(key, modifiers, text.as_deref());
             }
+            Message::KeyBar(key, modifiers) => return self.on_key(key, modifiers, None),
             Message::Tick if self.jump_pending => {
                 // Subfolder index is growing: refresh hits, keep selection.
                 // One last time after indexing ends.
@@ -3208,7 +3214,9 @@ impl Guppy {
                 background: Some(rgb(t.dark_background).into()),
                 ..Default::default()
             });
-        let main: Element<'_, Message> = column![self.menubar(), desk, self.statusbar()].into();
+        let main: Element<'_, Message> = column![self.menubar(), desk, self.statusbar()]
+            .push(self.config.view.keybar.then(|| self.keybar()))
+            .into();
         let main = match self.drag.as_ref().filter(|d| d.active) {
             Some(d) => {
                 let grab = mouse_area(main).interaction(iced::mouse::Interaction::Grabbing);
@@ -4715,6 +4723,60 @@ impl Guppy {
             .style(move |_| container::Style {
                 background: Some(Color { a: 0.35, ..rgb(t.muted) }.into()),
                 border: Border::default().rounded(radius),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// The most used keys as buttons along the bottom edge: what it does, the key below.
+    fn keybar(&self) -> Element<'_, Message> {
+        let t = &self.theme;
+        let none = keyboard::Modifiers::empty();
+        let ctrl = keyboard::Modifiers::COMMAND;
+        let f = |n: Named| Key::Named(n);
+        let c = |s: &str| Key::Character(s.into());
+        // The number says which go first when the window is too narrow for all of them.
+        let keys: [(u8, &str, &str, Key, keyboard::Modifiers); 13] = [
+            (7, "Help", "F1", f(Named::F1), none),
+            (6, "Rename", "F2", f(Named::F2), none),
+            (4, "View", "F3", f(Named::F3), none),
+            (5, "Edit", "F4", f(Named::F4), none),
+            (0, "Copy", "F5", f(Named::F5), none),
+            (1, "Move", "F6", f(Named::F6), none),
+            (2, "New folder", "F7", f(Named::F7), none),
+            (3, "Trash", "F8", f(Named::F8), none),
+            (10, "Quick view", "Ctrl+Q", c("q"), ctrl),
+            (9, "Search", "Ctrl+F", c("f"), ctrl),
+            (11, "Commands", "Ctrl+P", c("p"), ctrl),
+            (8, "Undo", "Ctrl+Z", c("z"), ctrl),
+            (12, "Settings", "F12", f(Named::F12), none),
+        ];
+        let fit = ((self.width - 12.0) / 86.0).max(1.0) as u8;
+        let buttons = keys.into_iter().filter(|k| k.0 < fit).map(|(_, name, combo, key, m)| {
+            let label = column![
+                text(name).size(12).color(rgb(t.foreground)).wrapping(iced::widget::text::Wrapping::None),
+                text(if cfg!(target_os = "macos") { combo.replace("Ctrl", "Cmd") } else { combo.to_string() }).size(10).font(BOLD).color(rgb(t.accent)),
+            ]
+            .spacing(1)
+            .align_x(iced::Alignment::Center);
+            button(container(label).center_x(Length::Fill).center_y(Length::Fill).clip(true))
+                .padding(0)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .on_press(Message::KeyBar(key, m))
+                .style(move |_, status| button::Style {
+                    background: Some(rgb(if matches!(status, button::Status::Hovered | button::Status::Pressed) { t.lighter_background } else { t.sheet_dim }).into()),
+                    border: Border::default().rounded(6),
+                    ..Default::default()
+                })
+                .into()
+        });
+        container(row(buttons).spacing(4))
+            .padding(iced::Padding { top: 0.0, bottom: 6.0, left: 6.0, right: 6.0 })
+            .height(46)
+            .width(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(rgb(t.dark_background).into()),
                 ..Default::default()
             })
             .into()

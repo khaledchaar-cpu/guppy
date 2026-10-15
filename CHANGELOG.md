@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Key bar along the bottom edge: the most used keys as buttons, each with what it does and
+  the key below it. A click acts like pressing the key. When the window is too narrow, the
+  less used ones are left out first. Off by default: `[view] keybar = true` or
+  Settings → Appearance.
+
 ## [0.3.0] - 2026-10-14
 
 ### Added

@@ -78,6 +78,8 @@ pub struct View {
     /// Compute folder sizes automatically; otherwise only on Ctrl+R.
     pub dir_sizes: bool,
     pub look: Look,
+    /// Row of the most used keys as buttons along the bottom edge.
+    pub keybar: bool,
 }
 
 /// Overall appearance.
@@ -142,7 +144,7 @@ impl Default for Start {
 
 impl Default for View {
     fn default() -> Self {
-        Self { show_hidden: false, sort: SortBy::Name, dir_sizes: true, look: Look::Paper }
+        Self { show_hidden: false, sort: SortBy::Name, dir_sizes: true, look: Look::Paper, keybar: false }
     }
 }
 
@@ -171,6 +173,7 @@ show_hidden = false
 sort = "name"      # "name", "size" or "date"
 dir_sizes = true   # compute folder sizes automatically (otherwise only on Ctrl+R)
 look = "paper"     # "paper" (Omarchy colors), "matte-black" or "neon" (cyberpunk terminal)
+keybar = false     # the most used keys as buttons along the bottom edge
 
 [confirm]
 # Ask before these operations. Progress is shown either way.
@@ -246,6 +249,7 @@ impl Config {
                 ("view", "sort") => q(self.view.sort.name()),
                 ("view", "dir_sizes") => self.view.dir_sizes.to_string(),
                 ("view", "look") => q(self.view.look.name()),
+                ("view", "keybar") => self.view.keybar.to_string(),
                 ("confirm", "copy") => self.confirm.copy.to_string(),
                 ("confirm", "move") => self.confirm.move_.to_string(),
                 ("confirm", "trash") => self.confirm.trash.to_string(),
