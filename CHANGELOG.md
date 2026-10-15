@@ -5,8 +5,9 @@
 ### Added
 - Four favorite folder buttons at the top of each pane. Click opens the folder in that pane;
   a free slot (+) takes the pane's folder on click. Right-click puts the pane's folder on a
-  button, or frees it when you're already there. They are kept as `[[favorite]]` in the
-  config file, where the names can be changed too.
+  button, or frees it when you're already there. The row only shows once a favorite is set;
+  the first one comes from the command palette (Ctrl+P, "Favorite button for this folder").
+  They are kept as `[[favorite]]` in the config file, where the names can be changed too.
 
 ## [0.3.0] - 2026-10-14
 

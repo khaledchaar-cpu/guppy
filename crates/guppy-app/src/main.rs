@@ -471,6 +471,7 @@ enum Cmd {
     DrivesLeft,
     DrivesRight,
     Bookmark,
+    Favorite,
     Jobs,
     PauseJob,
     Look,
@@ -513,6 +514,7 @@ const COMMANDS: &[(&str, &str, Cmd)] = &[
     ("Drives & bookmarks: left pane", "Alt+F1", Cmd::DrivesLeft),
     ("Drives & bookmarks: right pane", "Alt+F2", Cmd::DrivesRight),
     ("Bookmark this folder", "Ctrl+D", Cmd::Bookmark),
+    ("Favorite button for this folder (add / remove)", "", Cmd::Favorite),
     ("Running jobs", "Ctrl+J", Cmd::Jobs),
     ("Pause / resume job", "Ctrl+Shift+J", Cmd::PauseJob),
     ("Switch look: paper / matte black / neon", "", Cmd::Look),
@@ -2538,6 +2540,16 @@ impl Guppy {
             Cmd::DrivesLeft => self.open_drives(0),
             Cmd::DrivesRight => self.open_drives(1),
             Cmd::Bookmark => self.bookmark_here(),
+            Cmd::Favorite => {
+                // Its own button again if it has one (clears it), else the first free one.
+                let (side, cwd) = (self.active, self.panes[self.active].path.clone());
+                let favs = &self.config.favorites;
+                let mine = favs.iter().position(|f| !f.path.is_empty() && Config::resolve(&f.path, &cwd) == cwd);
+                let free = (0..4).find(|&i| favs.get(i).is_none_or(|f| f.path.is_empty()));
+                if let Some(slot) = mine.or(free) {
+                    self.set_favorite(side, slot);
+                }
+            }
             Cmd::Jobs => self.dialog = Some(Dialog::Jobs),
             Cmd::PauseJob => {
                 let _ = self.update(Message::TogglePause);
@@ -4464,11 +4476,12 @@ impl Guppy {
         let k = Self::eased(self.active_at, APPEAR);
         let rest = if self.neon() { rgb(t.muted) } else { Color { a: 0.0, ..rgb(t.accent) } };
         let outline = if active { Some(mix(rest, rgb(t.accent), k)) } else { self.neon().then(|| rgb(t.muted)) };
-        let favorites = self.favorite_bar(side);
-        let content: Element<'_, Message> = match self.tab_bar(side, active) {
-            Some(bar) => column![bar, favorites, header, body].into(),
-            None => column![favorites, header, body].into(),
-        };
+        let content: Element<'_, Message> = column![]
+            .push(self.tab_bar(side, active))
+            .push(self.favorite_bar(side, tone))
+            .push(header)
+            .push(body)
+            .into();
         let sheet = self.sheet(content, side, tone, outline)
             .width(Length::FillPortion(3));
         mouse_area(sheet).on_enter(Message::HoverPane(side)).into()
@@ -4525,9 +4538,14 @@ impl Guppy {
         line.into()
     }
 
-    /// Four folder buttons at the top of a pane. Click opens, right-click sets or clears.
-    fn favorite_bar(&self, side: usize) -> Element<'_, Message> {
+    /// Four folder buttons at the top of a pane, once at least one is set.
+    /// Click opens, right-click sets or clears.
+    fn favorite_bar(&self, side: usize, tone: u32) -> Option<Element<'_, Message>> {
         let t = &self.theme;
+        if self.config.favorites.iter().all(|f| f.path.is_empty()) {
+            return None;
+        }
+        let (sheet, ink) = (rgb(tone), rgb(t.foreground));
         let here = &self.panes[side].path;
         let buttons = (0..4).map(|slot| {
             let fav = self.config.favorites.get(slot).filter(|f| !f.path.is_empty());
@@ -4550,9 +4568,9 @@ impl Guppy {
                 .on_press(Message::Favorite(side, slot))
                 .style(move |_, status| button::Style {
                     background: Some(match status {
-                        button::Status::Hovered | button::Status::Pressed => Color { a: 0.12, ..Color::WHITE },
-                        _ if shown => Color { a: 0.08, ..Color::WHITE },
-                        _ => Color { a: 0.04, ..Color::WHITE },
+                        button::Status::Hovered | button::Status::Pressed => mix(sheet, ink, 0.14),
+                        _ if shown => mix(sheet, ink, 0.08),
+                        _ => mix(sheet, ink, 0.04),
                     }.into()),
                     border: Border {
                         color: if shown { rgb(t.accent) } else { Color { a: 0.35, ..rgb(t.foreground) } },
@@ -4577,7 +4595,7 @@ impl Guppy {
                 .delay(Duration::from_millis(600))
                 .into()
         });
-        container(row(buttons).spacing(4)).padding(iced::Padding { top: 6.0, left: 6.0, right: 6.0, bottom: 0.0 }).into()
+        Some(container(row(buttons).spacing(4)).padding(iced::Padding { top: 6.0, left: 6.0, right: 6.0, bottom: 0.0 }).into())
     }
 
     /// Tabs above the pane header, only when there is more than one.

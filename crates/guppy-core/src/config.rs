@@ -195,7 +195,8 @@ command = ""       # editor for F4, e.g. "code" or "kitty -e nvim"; "" = automat
 # path = "~/Work/projects"
 
 # The four folder buttons at the top of each pane, in order; path = "" leaves one free.
-# Right-click a button to put the pane's folder on it (again to clear it).
+# Right-click a button to put the pane's folder on it (again to clear it). The row is
+# hidden while none is set; Ctrl+P "Favorite button for this folder" adds the first.
 # [[favorite]]
 # name = "Downloads"
 # path = "~/Downloads"
