@@ -17,6 +17,10 @@ pub struct Config {
     /// Folders the user keeps at hand, in their order (`[[bookmark]]`).
     #[serde(rename = "bookmark")]
     pub bookmarks: Vec<Bookmark>,
+    /// The four folder buttons at the top of each pane (`[[favorite]]`), in slot order;
+    /// an empty path is a free slot.
+    #[serde(rename = "favorite")]
+    pub favorites: Vec<Bookmark>,
     /// Shell commands on a key (`[[action]]`), see [`crate::actions`].
     #[serde(rename = "action")]
     pub actions: Vec<Action>,
@@ -132,7 +136,7 @@ pub struct Network {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { start: Start::default(), view: View::default(), confirm: Confirm::default(), network: Network::default(), edit: Edit::default(), bookmarks: Vec::new(), actions: Vec::new() }
+        Self { start: Start::default(), view: View::default(), confirm: Confirm::default(), network: Network::default(), edit: Edit::default(), bookmarks: Vec::new(), favorites: Vec::new(), actions: Vec::new() }
     }
 }
 
@@ -192,6 +196,13 @@ command = ""       # editor for F4, e.g. "code" or "kitty -e nvim"; "" = automat
 # [[bookmark]]
 # name = "Projects"
 # path = "~/Work/projects"
+
+# The four folder buttons at the top of each pane, in order; path = "" leaves one free.
+# Right-click a button to put the pane's folder on it (again to clear it). The row is
+# hidden while none is set; Ctrl+P "Favorite button for this folder" adds the first.
+# [[favorite]]
+# name = "Downloads"
+# path = "~/Downloads"
 
 # Your own commands, also in the command palette (Ctrl+P). They run in the active
 # pane's folder. %f = file under the cursor, %F = marked files (or %f),
@@ -270,6 +281,9 @@ impl Config {
         }
         for b in &self.bookmarks {
             out.push_str(&format!("\n[[bookmark]]\nname = {}\npath = {}\n", q(&b.name), q(&b.path)));
+        }
+        for f in &self.favorites {
+            out.push_str(&format!("\n[[favorite]]\nname = {}\npath = {}\n", q(&f.name), q(&f.path)));
         }
         for a in &self.actions {
             out.push_str(&format!("\n[[action]]\nname = {}\nkey = {}\ncommand = {}\n", q(&a.name), q(&a.key), q(&a.command)));
