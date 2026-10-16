@@ -713,6 +713,8 @@ struct Pane {
     sizing: Cancel,
     scroll_y: f32,
     view_h: f32,
+    /// Where the list sits in the window, for drops from other apps.
+    list_bounds: iced::Rectangle,
     /// Smooth scroll target; `None` = no animation.
     scroll_target: Option<f32>,
     id: Id,
@@ -787,6 +789,7 @@ impl Pane {
             sizing: Cancel::default(),
             scroll_y: 0.0,
             view_h: 400.0,
+            list_bounds: iced::Rectangle::default(),
             scroll_target: None,
             id: Id::new(id),
             network: false,
@@ -863,6 +866,8 @@ struct Guppy {
     /// Which helper programs were found, checked whenever the settings open.
     tools_found: Vec<bool>,
     drag: Option<Drag>,
+    /// Row (side, index) under files dragged in from another app.
+    ext_over: Option<(usize, usize)>,
     /// Modifier keys held right now (Ctrl while dropping copies).
     mods: keyboard::Modifiers,
     /// Outcome of the last install started from the settings.
@@ -974,6 +979,7 @@ impl Guppy {
             later: Vec::new(),
             tools_found: Vec::new(),
             drag: None,
+            ext_over: None,
             mods: keyboard::Modifiers::default(),
             tools_note: None,
             git: [None, None],
@@ -1462,21 +1468,26 @@ impl Guppy {
             }
             #[cfg(target_os = "linux")]
             Message::Dnd(dnd::Event::Hover(at)) => {
-                // The pane under the files becomes the active one, so its frame shows the target.
-                if let Some(at) = at {
+                // The pane under the files becomes the active one, so its frame shows the
+                // target; a folder row under them gets the drop outline.
+                self.ext_over = at.and_then(|at| {
                     self.active = self.side_at(at.x);
-                }
+                    self.row_at(self.active, at)
+                });
             }
             #[cfg(target_os = "linux")]
             Message::Dnd(dnd::Event::Drop { at, paths, copy }) => {
+                self.ext_over = None;
                 let side = self.side_at(at.x);
                 self.active = side;
-                let target = self.panes[side].path.clone();
                 if self.panes[side].archive {
                     self.dialog = Some(Dialog::Report { title: "Archive is read-only", problems: vec!["Files can't be copied or moved into an archive.".into()] });
-                } else if !paths.iter().all(|p| p.parent() == Some(target.as_path())) {
+                    return Task::none();
+                }
+                let d = Drag { side, paths, start: None, at: None, active: true, over: self.row_at(side, at) };
+                if let Some((_, target)) = self.drop_plan(&d) {
                     self.glow.push((target.clone(), std::time::Instant::now()));
-                    self.ask_with(if copy { OpKind::Copy } else { OpKind::Move }, paths, Some(target));
+                    self.ask_with(if copy { OpKind::Copy } else { OpKind::Move }, d.paths, Some(target));
                 }
             }
             Message::Resized(size) => {
@@ -1486,6 +1497,7 @@ impl Guppy {
             Message::Scrolled(side, vp) => {
                 let p = &mut self.panes[side];
                 p.view_h = vp.bounds().height;
+                p.list_bounds = vp.bounds();
                 // During animation the list reports the position of an earlier frame;
                 // our own value is authoritative then.
                 if p.scroll_target.is_none() {
@@ -1958,7 +1970,19 @@ impl Guppy {
     /// The pane at window x position `x`.
     #[cfg(target_os = "linux")]
     fn side_at(&self, x: f32) -> usize {
-        usize::from(x > self.width / 2.0)
+        let b = self.panes[1].list_bounds;
+        if b.width > 0.0 { usize::from(x >= b.x) } else { usize::from(x > self.width / 2.0) }
+    }
+
+    /// The row of pane `side` at a window position, if there is one.
+    #[cfg(target_os = "linux")]
+    fn row_at(&self, side: usize, at: iced::Point) -> Option<(usize, usize)> {
+        let p = &self.panes[side];
+        if !p.list_bounds.contains(at) {
+            return None;
+        }
+        let i = ((at.y - p.list_bounds.y + p.scroll_y) / ROW_H) as usize;
+        (i < p.visible(self.show_hidden, &self.sizes).len()).then_some((side, i))
     }
 
     fn ask(&mut self, kind: OpKind) {
@@ -4423,7 +4447,8 @@ impl Guppy {
                 );
             }
             // A folder that would take the dragged files.
-            let drop_here = self.drag.as_ref().is_some_and(|d| d.active && d.over == Some((side, i)) && e.is_dir() && !d.paths.contains(&e.path));
+            let drop_here = self.drag.as_ref().is_some_and(|d| d.active && d.over == Some((side, i)) && e.is_dir() && !d.paths.contains(&e.path))
+                || (self.ext_over == Some((side, i)) && e.is_dir());
             let glow = self.glow.iter().filter(|(p, _)| *p == e.path).map(|(_, t)| Self::progress(*t, GLOW)).fold(None, |a: Option<f32>, x| Some(a.map_or(x, |a| a.min(x))));
             let bg = if on_cursor {
                 Some(rgb(t.accent))
