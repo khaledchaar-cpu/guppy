@@ -15,7 +15,7 @@ use sctk::reexports::client::backend::Backend;
 mod dnd;
 mod mime;
 
-pub use dnd::{DndEvent, set_dnd_hook};
+pub use dnd::{DndEvent, set_dnd_hook, start_drag};
 mod state;
 mod worker;
 
@@ -40,6 +40,7 @@ impl Clipboard {
 
         // Create channel to send data to clipboard thread.
         let (request_sender, rx_chan) = channel::channel();
+        dnd::set_sender(request_sender.clone());
         // Create channel to get data from the clipboard thread.
         let (clipboard_reply_sender, request_receiver) = mpsc::channel();
 

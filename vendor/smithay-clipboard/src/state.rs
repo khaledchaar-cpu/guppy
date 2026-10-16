@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 
 use sctk::data_device_manager::data_device::{DataDevice, DataDeviceHandler};
 use sctk::data_device_manager::data_offer::{DataOfferError, DataOfferHandler, DragOffer};
-use sctk::data_device_manager::data_source::{CopyPasteSource, DataSourceHandler};
+use sctk::data_device_manager::data_source::{CopyPasteSource, DataSourceHandler, DragSource};
 use sctk::data_device_manager::{DataDeviceManagerState, WritePipe};
 use sctk::primary_selection::PrimarySelectionManagerState;
 use sctk::primary_selection::device::{PrimarySelectionDevice, PrimarySelectionDeviceHandler};
@@ -60,6 +60,11 @@ pub struct State {
 
     data_sources: Vec<CopyPasteSource>,
     data_selection_content: Rc<[u8]>,
+
+    /// Guppy: the latest button press (seat, serial, surface), to start a drag from.
+    last_press: Option<(ObjectId, u32, WlSurface)>,
+    /// Guppy: files being dragged out of the window, as `text/uri-list`.
+    drag_source: Option<(DragSource, Rc<[u8]>)>,
 }
 
 impl State {
@@ -97,6 +102,8 @@ impl State {
             primary_sources: Vec::new(),
             data_device_manager_state,
             data_sources: Vec::new(),
+            last_press: None,
+            drag_source: None,
             latest_seat: None,
             loop_handle,
             exit: false,
@@ -372,8 +379,12 @@ impl PointerHandler for State {
         let mut updated_serial = false;
         for event in events {
             match event.kind {
-                PointerEventKind::Press { serial, .. }
-                | PointerEventKind::Release { serial, .. } => {
+                PointerEventKind::Press { serial, .. } => {
+                    updated_serial = true;
+                    seat_state.latest_serial = serial;
+                    self.last_press = Some((seat_id.clone(), serial, event.surface.clone()));
+                },
+                PointerEventKind::Release { serial, .. } => {
                     updated_serial = true;
                     seat_state.latest_serial = serial;
                 },
@@ -462,19 +473,58 @@ impl DataDeviceHandler for State {
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
 }
 
+impl State {
+    /// Guppy: starts dragging files (a `text/uri-list`) out of the window; needs
+    /// the mouse button that started it to still be held.
+    pub fn start_drag(&mut self, uri_list: String) {
+        let Some((seat, serial, surface)) = self.last_press.clone() else { return };
+        let Some(device) = self.seats.get(&seat).and_then(|s| s.data_device.as_ref()) else { return };
+        let Some(mgr) = self.data_device_manager_state.as_ref() else { return };
+        let source = mgr.create_drag_and_drop_source(
+            &self.queue_handle,
+            [crate::dnd::URI_LIST, "text/plain;charset=utf-8", "text/plain"],
+            DndAction::Copy | DndAction::Move,
+        );
+        source.start_drag(device, &surface, None, serial);
+        self.drag_source = Some((source, Rc::from(uri_list.into_bytes())));
+    }
+
+    fn is_drag_source(&self, source: &WlDataSource) -> bool {
+        self.drag_source.as_ref().is_some_and(|(s, _)| s.inner() == source)
+    }
+}
+
 impl DataSourceHandler for State {
     fn send_request(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &WlDataSource,
+        source: &WlDataSource,
         mime: String,
-        write_pipe: WritePipe,
+        mut write_pipe: WritePipe,
     ) {
+        if let Some((_, uris)) = self.drag_source.as_ref().filter(|_| self.is_drag_source(source)) {
+            let data: Vec<u8> = if mime == crate::dnd::URI_LIST {
+                uris.to_vec()
+            } else {
+                // Plain text: the paths, one per line.
+                String::from_utf8_lossy(uris)
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("file://"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .into_bytes()
+            };
+            let _ = write_pipe.write_all(&data);
+            return;
+        }
         self.send_request(SelectionTarget::Clipboard, write_pipe, mime)
     }
 
     fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, deleted: &WlDataSource) {
+        if self.is_drag_source(deleted) {
+            self.drag_source = None;
+        }
         self.data_sources.retain(|source| source.inner() != deleted)
     }
 
@@ -491,7 +541,11 @@ impl DataSourceHandler for State {
 
     fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
 
-    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
+        if self.is_drag_source(source) {
+            self.drag_source = None;
+        }
+    }
 }
 
 impl DataOfferHandler for State {

@@ -4,7 +4,7 @@
 //! `wl_data_device` of a client, which is the clipboard's. So the clipboard
 //! takes drops too and hands them to a hook the app sets.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const URI_LIST: &str = "text/uri-list";
@@ -48,4 +48,20 @@ pub(crate) fn set_action(bits: u32) {
 
 pub(crate) fn action() -> u32 {
     ACTION.load(Ordering::Relaxed)
+}
+
+static SENDER: OnceLock<Mutex<sctk::reexports::calloop::channel::Sender<crate::worker::Command>>> = OnceLock::new();
+
+pub(crate) fn set_sender(s: sctk::reexports::calloop::channel::Sender<crate::worker::Command>) {
+    let _ = SENDER.set(Mutex::new(s));
+}
+
+/// Starts dragging files out of the window, given as a `text/uri-list`. Call
+/// it while the mouse button that started the drag is still held. Returns
+/// false when there is no Wayland clipboard to do it.
+pub fn start_drag(uri_list: String) -> bool {
+    SENDER
+        .get()
+        .and_then(|s| s.lock().ok())
+        .is_some_and(|s| s.send(crate::worker::Command::StartDrag(uri_list)).is_ok())
 }

@@ -36,6 +36,8 @@ pub enum Command {
     Load,
     /// Load primary selection.
     LoadPrimary,
+    /// Guppy: start dragging files (`text/uri-list`) out of the window.
+    StartDrag(String),
     /// Shutdown the worker.
     Exit,
 }
@@ -85,6 +87,7 @@ fn worker_impl(
                             .reply_tx
                             .send(Err(Error::other("requested selection is not supported")));
                     },
+                    Command::StartDrag(uris) => state.start_drag(uris),
                     Command::Exit => state.exit = true,
                 }
             }

@@ -123,6 +123,8 @@ enum Message {
     /// Mouse while a row is held: where it is, and the button let go.
     DragMoved(iced::Point),
     DragReleased,
+    /// A held row left the window: hand the files to the compositor's drag and drop.
+    DragOut,
     /// The pointer is over a row (side, index) during a drag, or left it.
     DragOver(usize, usize),
     DragLeft(usize, usize),
@@ -860,6 +862,7 @@ struct Guppy {
     last_frame: Option<std::time::Instant>,
     /// Window width, for the responsive layout.
     width: f32,
+    height: f32,
     /// Last cursor move, to detect key repeat.
     last_move: Option<std::time::Instant>,
     /// Folders currently being read, per side.
@@ -977,6 +980,7 @@ impl Guppy {
             rename: None,
             last_frame: None,
             width: 1200.0,
+            height: 760.0,
             last_move: None,
             loads: [None, None],
             later: Vec::new(),
@@ -1129,6 +1133,7 @@ impl Guppy {
                 iced::event::listen_with(|e, _, _| match e {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::DragMoved(position)),
                     iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::DragReleased),
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => Some(Message::DragOut),
                     _ => None,
                 }),
             ]);
@@ -1407,6 +1412,19 @@ impl Guppy {
                     let start = *d.start.get_or_insert(at);
                     d.at = Some(at);
                     d.active |= (at.x - start.x).hypot(at.y - start.y) > 6.0;
+                    if d.active && (at.x < 0.0 || at.y < 0.0 || at.x >= self.width || at.y >= self.height) {
+                        return self.update(Message::DragOut);
+                    }
+                }
+            }
+            Message::DragOut => {
+                // Out of the window the files go to other apps; inside, iced keeps the drag.
+                #[cfg(target_os = "linux")]
+                if let Some(d) = self.drag.take_if(|d| d.active && !self.panes[d.side].archive) {
+                    let uris: String = d.paths.iter().map(|p| format!("{}\r\n", clip::uri(p))).collect();
+                    if !smithay_clipboard::start_drag(uris) {
+                        self.drag = Some(d);
+                    }
                 }
             }
             Message::DragOver(side, i) => {
@@ -1510,6 +1528,7 @@ impl Guppy {
             }
             Message::Resized(size) => {
                 self.width = size.width;
+                self.height = size.height;
                 return Task::none();
             }
             Message::Scrolled(side, vp) => {

@@ -65,7 +65,7 @@ pub fn get() -> Option<(Vec<PathBuf>, bool)> {
 }
 
 #[cfg(target_os = "linux")]
-fn uri(p: &Path) -> String {
+pub(crate) fn uri(p: &Path) -> String {
     let mut out = String::from("file://");
     for b in p.as_os_str().as_encoded_bytes() {
         match b {
