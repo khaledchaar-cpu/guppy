@@ -203,6 +203,19 @@ enum Message {
     Shot(iced::window::Screenshot),
 }
 
+/// Shortens a name that is too long in the middle, so its end (`… v1.zip`) stays readable.
+fn cut_middle(name: &str, max: usize) -> String {
+    let n = name.chars().count();
+    if n <= max {
+        return name.to_string();
+    }
+    let keep = max.saturating_sub(1);
+    let tail = (keep * 2 / 5).max(1);
+    let head: String = name.chars().take(keep - tail).collect();
+    let end: String = name.chars().skip(n - tail).collect();
+    format!("{head}…{end}")
+}
+
 /// Input starting with `~` (on Unix also `/`) jumps instead of filtering.
 fn is_jump(query: &str) -> bool {
     query.chars().next().is_some_and(guppy_core::platform::is_jump_prefix)
@@ -4231,6 +4244,20 @@ impl Guppy {
         let max_size = list.iter().filter_map(|e| entry_size(e, &self.sizes)).max().unwrap_or(0);
 
         let row_radius = if self.neon() { 0 } else { 3 };
+        // Characters that fit in the name column (monospace, 13 px ≈ 7.8 px per char):
+        // pane minus frame, scrollbar, row padding, dot, size and the optional columns.
+        let pane_w = (self.width - 26.0 - 16.0) / 2.0;
+        let mut name_w = pane_w - 2.0 - 12.0 - 10.0 - 20.0 - 14.0 - 8.0 - 8.0 - 84.0;
+        if self.show_dates() {
+            name_w -= 108.0;
+        }
+        if self.git[side].is_some() {
+            name_w -= 20.0;
+        }
+        if p.sort == Sort::Size {
+            name_w -= 64.0;
+        }
+        let name_chars = (name_w / 7.8).floor().max(3.0) as usize;
         let rows = list.iter().enumerate().map(|(i, e)| {
             let marked = p.marked.contains(&e.path);
             let is_cur = i == p.cursor;
@@ -4245,6 +4272,7 @@ impl Guppy {
             let dot = if marked { "●" } else { " " };
             let dot_color = if on_cursor { fg } else if marked { rgb(t.marked) } else { self.class_color(e.class()) };
             let name = if e.is_dir() { format!("/{}", e.name) } else { e.name.clone() };
+            let name = cut_middle(&name, name_chars);
             let (size, pending) = match (e.is_dir() && !e.is_virtual(), self.sizes.get(&e.path)) {
                 (false, _) => (human_size(e.size), false),
                 (true, Some(DirSize::Done(n))) => (human_size(n), false),
@@ -5039,6 +5067,13 @@ fn save_ppm(path: &std::ffi::OsStr, shot: &iced::window::Screenshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cut_middle_keeps_the_end() {
+        assert_eq!(cut_middle("short.txt", 20), "short.txt");
+        assert_eq!(cut_middle("Flux1-Dev Studio Claude v1.json", 19), "Flux1-Dev S…v1.json");
+        assert_eq!(cut_middle("Flux1-Dev Studio Claude v1.json", 19).chars().count(), 19);
+    }
 
     #[test]
     fn palette_finds_commands() {
