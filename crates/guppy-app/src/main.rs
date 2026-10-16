@@ -4478,7 +4478,9 @@ impl Guppy {
             } else {
                 None
             };
-            let border = if drop_here { Border { color: rgb(t.accent), width: 1.5, radius: row_radius.into() } } else { Border::default().rounded(row_radius) };
+            // On the cursor row (accent background) the outline takes the text color instead.
+            let outline = if on_cursor { fg } else { rgb(t.accent) };
+            let border = if drop_here { Border { color: outline, width: 1.5, radius: row_radius.into() } } else { Border::default().rounded(row_radius) };
             let area = mouse_area(
                 container(line)
                     .height(ROW_H)
