@@ -78,6 +78,10 @@ fn run(conn: Connection) -> Result<(), String> {
         devices: Vec::new(),
         action: DndAction::Copy,
     };
+    // sctk only reports seats that appear later; the ones already there are taken here.
+    for seat in state.seats.seats().collect::<Vec<_>>() {
+        state.new_seat(&conn, &qh, seat);
+    }
     loop {
         queue.blocking_dispatch(&mut state).map_err(|e| e.to_string())?;
     }
@@ -98,12 +102,21 @@ impl State {
     }
 }
 
+/// `GUPPY_DND_DEBUG=1`: log what arrives from the compositor.
+fn debug(what: std::fmt::Arguments) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("GUPPY_DND_DEBUG").is_some()) {
+        eprintln!("guppy-dnd: {what}");
+    }
+}
+
 fn send(e: Event) {
     let _ = channel().0.try_send(e);
 }
 
 impl DataDeviceHandler for State {
     fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, device: &WlDataDevice, x: f64, y: f64, _: &WlSurface) {
+        debug(format_args!("enter {x:.0},{y:.0} offer={}", self.offer(device).is_some()));
         // Drags that started inside Guppy have no offer; those are handled by iced.
         let Some(offer) = self.offer(device) else { return };
         let files = offer.with_mime_types(|m| m.iter().any(|m| m == URI_LIST));
@@ -115,6 +128,7 @@ impl DataDeviceHandler for State {
     }
 
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+        debug(format_args!("leave"));
         send(Event::Hover(None));
     }
 
@@ -127,6 +141,7 @@ impl DataDeviceHandler for State {
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
 
     fn drop_performed(&mut self, conn: &Connection, _: &QueueHandle<Self>, device: &WlDataDevice) {
+        debug(format_args!("drop offer={} action={:?}", self.offer(device).is_some(), self.action));
         let Some(offer) = self.offer(device) else { return };
         let at = iced::Point::new(offer.x as f32, offer.y as f32);
         let copy = !self.action.contains(DndAction::Move);
@@ -138,6 +153,7 @@ impl DataDeviceHandler for State {
         let _ = conn.flush();
         let mut text = String::new();
         let _ = pipe.read_to_string(&mut text);
+        debug(format_args!("received {text:?}"));
         let paths: Vec<PathBuf> = text.lines().filter(|l| !l.starts_with('#')).filter_map(|l| crate::clip::from_uri(l.trim())).collect();
         offer.finish();
         offer.destroy();
@@ -174,6 +190,7 @@ impl SeatHandler for State {
     }
     fn new_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: WlSeat) {
         if !self.devices.iter().any(|(s, _)| *s == seat) {
+            debug(format_args!("data device for seat {seat:?}"));
             let device = self.manager.get_data_device(qh, &seat);
             self.devices.push((seat, device));
         }
