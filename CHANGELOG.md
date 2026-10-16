@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1] - 2026-10-16
+
+### Changed
+- Names too long for the list are shortened in the middle instead of cut off at the end,
+  so similar names stay apart: `Flux1-Dev Studio…v1.json` next to `Flux1-Dev Studio…v1.zip`.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added
@@ -61,6 +67,7 @@ First public release.
 - Looks: `paper` (follows the Omarchy theme), `matte-black` and `neon`
 - Builds for Linux, Windows and macOS; downloads for all three on the release page
 
+[0.4.1]: https://github.com/khaledchaar-cpu/guppy/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/khaledchaar-cpu/guppy/compare/v0.1.0...v0.2.0
