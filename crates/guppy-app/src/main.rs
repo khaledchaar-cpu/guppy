@@ -62,6 +62,8 @@ fn main() -> iced::Result {
     START.get_or_init(std::time::Instant::now);
     guppy_core::platform::extend_path();
     prefer_vulkan();
+    #[cfg(target_os = "linux")]
+    dnd::start();
     iced::application(Guppy::new, Guppy::update, Guppy::view)
         .title(Guppy::title)
         .theme(Guppy::theme)
@@ -124,9 +126,6 @@ enum Message {
     /// The pointer is over a row (side, index) during a drag, or left it.
     DragOver(usize, usize),
     DragLeft(usize, usize),
-    /// Wayland connection of the window (`wl_display*`), for drops from other apps.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    Display(usize),
     /// Files from another app hover over the window or were dropped on it.
     #[cfg(target_os = "linux")]
     Dnd(dnd::Event),
@@ -1074,14 +1073,7 @@ impl Guppy {
                 g.confirm_dialog();
             }
         }
-        // Drops from other apps need the window's Wayland connection.
-        let display = iced::window::oldest().and_then(|id| {
-            iced::window::run(id, |w| match w.display_handle().map(|h| h.as_raw()) {
-                Ok(raw_window_handle::RawDisplayHandle::Wayland(h)) => h.display.as_ptr() as usize,
-                _ => 0,
-            })
-        });
-        (g, display.map(Message::Display))
+        (g, Task::none())
     }
 
     fn title(&self) -> String {
@@ -1467,10 +1459,6 @@ impl Guppy {
             Message::FsChanged(paths) => {
                 self.on_fs_changed(&paths);
                 return Task::none();
-            }
-            Message::Display(_display) => {
-                #[cfg(target_os = "linux")]
-                dnd::start(_display);
             }
             #[cfg(target_os = "linux")]
             Message::Dnd(dnd::Event::Hover(at)) => {

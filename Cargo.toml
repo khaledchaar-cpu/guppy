@@ -7,3 +7,7 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# smithay-clipboard with drops from other apps (see vendor/smithay-clipboard/src/dnd.rs).
+[patch.crates-io]
+smithay-clipboard = { path = "vendor/smithay-clipboard" }
