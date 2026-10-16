@@ -15,6 +15,9 @@ dirs = "7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wl-clipboard-rs = "0.9.4"
+smithay-client-toolkit = { version = "0.19.2", default-features = false }
+wayland-backend = { version = "0.3", features = ["client_system"] }
+raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.4.1"

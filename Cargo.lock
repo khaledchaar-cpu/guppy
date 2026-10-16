@@ -1279,7 +1279,10 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "smithay-client-toolkit 0.19.2",
  "smol",
+ "wayland-backend",
  "wl-clipboard-rs",
 ]
 

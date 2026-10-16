@@ -77,7 +77,7 @@ fn uri(p: &Path) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn from_uri(u: &str) -> Option<PathBuf> {
+pub(crate) fn from_uri(u: &str) -> Option<PathBuf> {
     let rest = u.strip_prefix("file://")?;
     // Skip an optional host part ("file://host/path").
     let rest = &rest[rest.find('/')?..];

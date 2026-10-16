@@ -2,6 +2,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod clip;
+#[cfg(target_os = "linux")]
+mod dnd;
 mod icons;
 mod paper;
 mod preview;
@@ -122,6 +124,12 @@ enum Message {
     /// The pointer is over a row (side, index) during a drag, or left it.
     DragOver(usize, usize),
     DragLeft(usize, usize),
+    /// Wayland connection of the window (`wl_display*`), for drops from other apps.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Display(usize),
+    /// Files from another app hover over the window or were dropped on it.
+    #[cfg(target_os = "linux")]
+    Dnd(dnd::Event),
     /// Mouse entered a pane: it becomes the active one.
     HoverPane(usize),
     Open(usize, usize),
@@ -1066,7 +1074,14 @@ impl Guppy {
                 g.confirm_dialog();
             }
         }
-        (g, Task::none())
+        // Drops from other apps need the window's Wayland connection.
+        let display = iced::window::oldest().and_then(|id| {
+            iced::window::run(id, |w| match w.display_handle().map(|h| h.as_raw()) {
+                Ok(raw_window_handle::RawDisplayHandle::Wayland(h)) => h.display.as_ptr() as usize,
+                _ => 0,
+            })
+        });
+        (g, display.map(Message::Display))
     }
 
     fn title(&self) -> String {
@@ -1102,6 +1117,10 @@ impl Guppy {
             iced::window::close_requests().map(Message::CloseRequested),
             watch::changes(watch::Targets { dirs }).map(Message::FsChanged),
         ]);
+        #[cfg(target_os = "linux")]
+        {
+            keys = Subscription::batch([keys, dnd::events().map(Message::Dnd)]);
+        }
         // The pointer is only followed while a row is held.
         if self.drag.is_some() {
             keys = Subscription::batch([
@@ -1448,6 +1467,29 @@ impl Guppy {
             Message::FsChanged(paths) => {
                 self.on_fs_changed(&paths);
                 return Task::none();
+            }
+            Message::Display(_display) => {
+                #[cfg(target_os = "linux")]
+                dnd::start(_display);
+            }
+            #[cfg(target_os = "linux")]
+            Message::Dnd(dnd::Event::Hover(at)) => {
+                // The pane under the files becomes the active one, so its frame shows the target.
+                if let Some(at) = at {
+                    self.active = self.side_at(at.x);
+                }
+            }
+            #[cfg(target_os = "linux")]
+            Message::Dnd(dnd::Event::Drop { at, paths, copy }) => {
+                let side = self.side_at(at.x);
+                self.active = side;
+                let target = self.panes[side].path.clone();
+                if self.panes[side].archive {
+                    self.dialog = Some(Dialog::Report { title: "Archive is read-only", problems: vec!["Files can't be copied or moved into an archive.".into()] });
+                } else if !paths.iter().all(|p| p.parent() == Some(target.as_path())) {
+                    self.glow.push((target.clone(), std::time::Instant::now()));
+                    self.ask_with(if copy { OpKind::Copy } else { OpKind::Move }, paths, Some(target));
+                }
             }
             Message::Resized(size) => {
                 self.width = size.width;
@@ -1923,6 +1965,12 @@ impl Guppy {
         }
         let copy = self.mods.command() || self.panes[d.side].archive;
         Some((if copy { OpKind::Copy } else { OpKind::Move }, target))
+    }
+
+    /// The pane at window x position `x`.
+    #[cfg(target_os = "linux")]
+    fn side_at(&self, x: f32) -> usize {
+        usize::from(x > self.width / 2.0)
     }
 
     fn ask(&mut self, kind: OpKind) {
