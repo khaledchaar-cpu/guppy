@@ -129,6 +129,9 @@ enum Message {
     /// Files from another app hover over the window or were dropped on it.
     #[cfg(target_os = "linux")]
     Dnd(dnd::Event),
+    /// Where a pane's list sits in the window (asked while files from other apps hover).
+    #[cfg(target_os = "linux")]
+    ListBounds(usize, Option<iced::Rectangle>),
     /// Mouse entered a pane: it becomes the active one.
     HoverPane(usize),
     Open(usize, usize),
@@ -1474,6 +1477,18 @@ impl Guppy {
                     self.active = self.side_at(at.x);
                     self.row_at(self.active, at)
                 });
+                // The list only reports its place when it scrolls, so ask for it.
+                if at.is_some() {
+                    return Task::batch((0..2).map(|side| {
+                        iced::widget::selector::find(self.panes[side].id.clone()).map(move |t| Message::ListBounds(side, t.map(|t| t.bounds())))
+                    }));
+                }
+            }
+            #[cfg(target_os = "linux")]
+            Message::ListBounds(side, bounds) => {
+                if let Some(b) = bounds {
+                    self.panes[side].list_bounds = b;
+                }
             }
             #[cfg(target_os = "linux")]
             Message::Dnd(dnd::Event::Drop { at, paths, copy }) => {
@@ -1485,6 +1500,9 @@ impl Guppy {
                     return Task::none();
                 }
                 let d = Drag { side, paths, start: None, at: None, active: true, over: self.row_at(side, at) };
+                if std::env::var_os("GUPPY_DND_DEBUG").is_some() {
+                    eprintln!("guppy-dnd: drop at {at:?} list {:?} scroll {} row {:?}", self.panes[side].list_bounds, self.panes[side].scroll_y, d.over);
+                }
                 if let Some((_, target)) = self.drop_plan(&d) {
                     self.glow.push((target.clone(), std::time::Instant::now()));
                     self.ask_with(if copy { OpKind::Copy } else { OpKind::Move }, d.paths, Some(target));
