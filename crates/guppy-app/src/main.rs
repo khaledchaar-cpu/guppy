@@ -641,7 +641,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
         ("Ctrl+Shift+J", "pause / resume job"),
         ("Ctrl+Q", "quick view in other pane"),
         ("Ctrl+U", "space map in other pane"),
-        ("Ctrl+F", "search text in files below"),
+        ("Ctrl+F", "search text in files below, or names (*.png)"),
         ("Ctrl+P", "command palette"),
         ("Alt+F1 / F2", "drives & bookmarks"),
         ("Ctrl+D", "bookmark this folder"),
@@ -2491,7 +2491,7 @@ impl Guppy {
             Some(Dialog::Search { cur, .. }) => *cur,
             _ => return,
         };
-        self.search_ctx = self.search_hits.get(cur).map(|h| guppy_core::search::context(&h.path, h.line, 3)).unwrap_or_default();
+        self.search_ctx = self.search_hits.get(cur).filter(|h| h.line > 0).map(|h| guppy_core::search::context(&h.path, h.line, 3)).unwrap_or_default();
     }
 
     fn on_search_key(&mut self, key: Key, typed: Option<&str>) {
@@ -3702,7 +3702,7 @@ impl Guppy {
                     list = list.push(
                         container(
                             row![
-                                container(text(format!("{rel}:{}", h.line)).size(12).color(if on { c } else { rgb(t.accent) }).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(2)).clip(true),
+                                container(text(if h.line > 0 { format!("{rel}:{}", h.line) } else { rel.to_string() }).size(12).color(if on { c } else { rgb(t.accent) }).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(2)).clip(true),
                                 container(text(h.text.clone()).size(12).color(c).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(3)).clip(true),
                             ]
                             .spacing(12),

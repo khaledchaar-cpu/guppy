@@ -2,6 +2,9 @@
 //!
 //! Text only: files with a NUL byte near the start count as binary and are
 //! skipped, as are files over [`MAX_FILE`]. The match ignores case.
+//!
+//! A needle with `*` or `?` (like `*.png`) looks for file and folder names
+//! instead; those hits have line 0.
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -20,7 +23,7 @@ const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".cache", "__pyca
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub path: PathBuf,
-    /// 1-based.
+    /// 1-based; 0 for a name hit.
     pub line: usize,
     /// The line, trimmed and cut to a readable length.
     pub text: String,
@@ -59,9 +62,10 @@ pub fn start(root: PathBuf, needle: &str, hidden: bool) -> Search {
     let scanned = Arc::new(AtomicUsize::new(0));
     let (s, d, n) = (stop.clone(), done.clone(), scanned.clone());
     let needle = needle.to_lowercase();
+    let names = needle.contains(['*', '?']);
     std::thread::spawn(move || {
         let found = AtomicUsize::new(0);
-        let ctx = Ctx { needle: &needle, hidden, stop: &s, scanned: &n, found: &found, tx: &tx };
+        let ctx = Ctx { needle: &needle, names, hidden, stop: &s, scanned: &n, found: &found, tx: &tx };
         let dev = std::fs::metadata(&root).map(|m| crate::platform::device(&m)).unwrap_or(0);
         walk(&ctx, &root, dev);
         d.store(true, Ordering::Relaxed);
@@ -71,6 +75,8 @@ pub fn start(root: PathBuf, needle: &str, hidden: bool) -> Search {
 
 struct Ctx<'a> {
     needle: &'a str,
+    /// The needle is a wildcard pattern for names.
+    names: bool,
     hidden: bool,
     stop: &'a AtomicBool,
     scanned: &'a AtomicUsize,
@@ -99,7 +105,18 @@ fn walk(ctx: &Ctx, dir: &Path, dev: u64) {
         }
         // DirEntry::metadata does not follow symlinks.
         let Ok(m) = e.metadata() else { continue };
-        if m.is_dir() {
+        if ctx.names {
+            if crate::fs::glob_match(ctx.needle, &name) {
+                if ctx.tx.send(Hit { path: e.path(), line: 0, text: String::new() }).is_err() {
+                    return;
+                }
+                ctx.found.fetch_add(1, Ordering::Relaxed);
+            }
+            ctx.scanned.fetch_add(1, Ordering::Relaxed);
+            if m.is_dir() && !SKIP_DIRS.contains(&name.as_str()) && crate::platform::device(&m) == dev {
+                subdirs.push(e.path());
+            }
+        } else if m.is_dir() {
             if !SKIP_DIRS.contains(&name.as_str()) && crate::platform::device(&m) == dev {
                 subdirs.push(e.path());
             }
@@ -177,6 +194,12 @@ mod tests {
         let mut hits: Vec<_> = s.rx.try_iter().map(|h| (h.path.strip_prefix(&root).unwrap().to_path_buf(), h.line)).collect();
         hits.sort();
         assert_eq!(hits, [(std::path::PathBuf::from("a.txt"), 2), (std::path::Path::new("sub").join("b.md"), 1)]);
+        let s = super::start(root.clone(), "*.MD", true);
+        while !s.finished() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let names: Vec<_> = s.rx.try_iter().map(|h| (h.path.strip_prefix(&root).unwrap().to_path_buf(), h.line)).collect();
+        assert_eq!(names, [(std::path::Path::new("sub").join("b.md"), 0)]);
         let ctx = super::context(&root.join("a.txt"), 2, 1);
         assert_eq!(ctx.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1, 2, 3]);
         std::fs::remove_dir_all(root).unwrap();
