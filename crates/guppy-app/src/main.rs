@@ -64,13 +64,27 @@ fn main() -> iced::Result {
         .title(Guppy::title)
         .theme(Guppy::theme)
         .subscription(Guppy::subscription)
-        .window_size((1200.0, 760.0))
+        .window(window_settings())
         .font(FONT_REGULAR)
         .font(FONT_BOLD)
         .default_font(FONT)
         // On close, save the size cache first.
         .exit_on_close_request(false)
         .run()
+}
+
+/// On Linux the window gets the class / app id `guppy` (like `guppy.desktop`),
+/// so window manager rules such as i3's `for_window [class="guppy"]` can match it.
+fn window_settings() -> iced::window::Settings {
+    iced::window::Settings {
+        size: iced::Size::new(1200.0, 760.0),
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "guppy".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// Without a choice, wgpu starts Vulkan *and* OpenGL to pick an adapter, which
