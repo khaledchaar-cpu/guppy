@@ -2,6 +2,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod clip;
+#[cfg(target_os = "linux")]
+mod dnd;
 mod icons;
 mod paper;
 mod preview;
@@ -60,6 +62,8 @@ fn main() -> iced::Result {
     START.get_or_init(std::time::Instant::now);
     guppy_core::platform::extend_path();
     prefer_vulkan();
+    #[cfg(target_os = "linux")]
+    dnd::start();
     iced::application(Guppy::new, Guppy::update, Guppy::view)
         .title(Guppy::title)
         .theme(Guppy::theme)
@@ -119,9 +123,17 @@ enum Message {
     /// Mouse while a row is held: where it is, and the button let go.
     DragMoved(iced::Point),
     DragReleased,
+    /// A held row left the window: hand the files to the compositor's drag and drop.
+    DragOut,
     /// The pointer is over a row (side, index) during a drag, or left it.
     DragOver(usize, usize),
     DragLeft(usize, usize),
+    /// Files from another app hover over the window or were dropped on it.
+    #[cfg(target_os = "linux")]
+    Dnd(dnd::Event),
+    /// Where a pane's list sits in the window (asked while files from other apps hover).
+    #[cfg(target_os = "linux")]
+    ListBounds(usize, Option<iced::Rectangle>),
     /// Mouse entered a pane: it becomes the active one.
     HoverPane(usize),
     Open(usize, usize),
@@ -629,7 +641,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
         ("Ctrl+Shift+J", "pause / resume job"),
         ("Ctrl+Q", "quick view in other pane"),
         ("Ctrl+U", "space map in other pane"),
-        ("Ctrl+F", "search text in files below"),
+        ("Ctrl+F", "search text in files below, or names (*.png)"),
         ("Ctrl+P", "command palette"),
         ("Alt+F1 / F2", "drives & bookmarks"),
         ("Ctrl+D", "bookmark this folder"),
@@ -706,6 +718,8 @@ struct Pane {
     sizing: Cancel,
     scroll_y: f32,
     view_h: f32,
+    /// Where the list sits in the window, for drops from other apps.
+    list_bounds: iced::Rectangle,
     /// Smooth scroll target; `None` = no animation.
     scroll_target: Option<f32>,
     id: Id,
@@ -780,6 +794,7 @@ impl Pane {
             sizing: Cancel::default(),
             scroll_y: 0.0,
             view_h: 400.0,
+            list_bounds: iced::Rectangle::default(),
             scroll_target: None,
             id: Id::new(id),
             network: false,
@@ -847,6 +862,7 @@ struct Guppy {
     last_frame: Option<std::time::Instant>,
     /// Window width, for the responsive layout.
     width: f32,
+    height: f32,
     /// Last cursor move, to detect key repeat.
     last_move: Option<std::time::Instant>,
     /// Folders currently being read, per side.
@@ -856,6 +872,8 @@ struct Guppy {
     /// Which helper programs were found, checked whenever the settings open.
     tools_found: Vec<bool>,
     drag: Option<Drag>,
+    /// Row (side, index) under files dragged in from another app.
+    ext_over: Option<(usize, usize)>,
     /// Modifier keys held right now (Ctrl while dropping copies).
     mods: keyboard::Modifiers,
     /// Outcome of the last install started from the settings.
@@ -962,11 +980,13 @@ impl Guppy {
             rename: None,
             last_frame: None,
             width: 1200.0,
+            height: 760.0,
             last_move: None,
             loads: [None, None],
             later: Vec::new(),
             tools_found: Vec::new(),
             drag: None,
+            ext_over: None,
             mods: keyboard::Modifiers::default(),
             tools_note: None,
             git: [None, None],
@@ -1102,6 +1122,10 @@ impl Guppy {
             iced::window::close_requests().map(Message::CloseRequested),
             watch::changes(watch::Targets { dirs }).map(Message::FsChanged),
         ]);
+        #[cfg(target_os = "linux")]
+        {
+            keys = Subscription::batch([keys, dnd::events().map(Message::Dnd)]);
+        }
         // The pointer is only followed while a row is held.
         if self.drag.is_some() {
             keys = Subscription::batch([
@@ -1109,6 +1133,7 @@ impl Guppy {
                 iced::event::listen_with(|e, _, _| match e {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::DragMoved(position)),
                     iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::DragReleased),
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => Some(Message::DragOut),
                     _ => None,
                 }),
             ]);
@@ -1387,6 +1412,19 @@ impl Guppy {
                     let start = *d.start.get_or_insert(at);
                     d.at = Some(at);
                     d.active |= (at.x - start.x).hypot(at.y - start.y) > 6.0;
+                    if d.active && (at.x < 0.0 || at.y < 0.0 || at.x >= self.width || at.y >= self.height) {
+                        return self.update(Message::DragOut);
+                    }
+                }
+            }
+            Message::DragOut => {
+                // Out of the window the files go to other apps; inside, iced keeps the drag.
+                #[cfg(target_os = "linux")]
+                if let Some(d) = self.drag.take_if(|d| d.active && !self.panes[d.side].archive) {
+                    let uris: String = d.paths.iter().map(|p| format!("{}\r\n", clip::uri(p))).collect();
+                    if !smithay_clipboard::start_drag(uris) {
+                        self.drag = Some(d);
+                    }
                 }
             }
             Message::DragOver(side, i) => {
@@ -1449,13 +1487,54 @@ impl Guppy {
                 self.on_fs_changed(&paths);
                 return Task::none();
             }
+            #[cfg(target_os = "linux")]
+            Message::Dnd(dnd::Event::Hover(at)) => {
+                // The pane under the files becomes the active one, so its frame shows the
+                // target; a folder row under them gets the drop outline.
+                self.ext_over = at.and_then(|at| {
+                    self.active = self.side_at(at.x);
+                    self.row_at(self.active, at)
+                });
+                // The list only reports its place when it scrolls, so ask for it.
+                if at.is_some() {
+                    return Task::batch((0..2).map(|side| {
+                        iced::widget::selector::find(self.panes[side].id.clone()).map(move |t| Message::ListBounds(side, t.map(|t| t.bounds())))
+                    }));
+                }
+            }
+            #[cfg(target_os = "linux")]
+            Message::ListBounds(side, bounds) => {
+                if let Some(b) = bounds {
+                    self.panes[side].list_bounds = b;
+                }
+            }
+            #[cfg(target_os = "linux")]
+            Message::Dnd(dnd::Event::Drop { at, paths, copy }) => {
+                self.ext_over = None;
+                let side = self.side_at(at.x);
+                self.active = side;
+                if self.panes[side].archive {
+                    self.dialog = Some(Dialog::Report { title: "Archive is read-only", problems: vec!["Files can't be copied or moved into an archive.".into()] });
+                    return Task::none();
+                }
+                let d = Drag { side, paths, start: None, at: None, active: true, over: self.row_at(side, at) };
+                if std::env::var_os("GUPPY_DND_DEBUG").is_some() {
+                    eprintln!("guppy-dnd: drop at {at:?} list {:?} scroll {} row {:?}", self.panes[side].list_bounds, self.panes[side].scroll_y, d.over);
+                }
+                if let Some((_, target)) = self.drop_plan(&d) {
+                    self.glow.push((target.clone(), std::time::Instant::now()));
+                    self.ask_with(if copy { OpKind::Copy } else { OpKind::Move }, d.paths, Some(target));
+                }
+            }
             Message::Resized(size) => {
                 self.width = size.width;
+                self.height = size.height;
                 return Task::none();
             }
             Message::Scrolled(side, vp) => {
                 let p = &mut self.panes[side];
                 p.view_h = vp.bounds().height;
+                p.list_bounds = vp.bounds();
                 // During animation the list reports the position of an earlier frame;
                 // our own value is authoritative then.
                 if p.scroll_target.is_none() {
@@ -1923,6 +2002,24 @@ impl Guppy {
         }
         let copy = self.mods.command() || self.panes[d.side].archive;
         Some((if copy { OpKind::Copy } else { OpKind::Move }, target))
+    }
+
+    /// The pane at window x position `x`.
+    #[cfg(target_os = "linux")]
+    fn side_at(&self, x: f32) -> usize {
+        let b = self.panes[1].list_bounds;
+        if b.width > 0.0 { usize::from(x >= b.x) } else { usize::from(x > self.width / 2.0) }
+    }
+
+    /// The row of pane `side` at a window position, if there is one.
+    #[cfg(target_os = "linux")]
+    fn row_at(&self, side: usize, at: iced::Point) -> Option<(usize, usize)> {
+        let p = &self.panes[side];
+        if !p.list_bounds.contains(at) {
+            return None;
+        }
+        let i = ((at.y - p.list_bounds.y + p.scroll_y) / ROW_H) as usize;
+        (i < p.visible(self.show_hidden, &self.sizes).len()).then_some((side, i))
     }
 
     fn ask(&mut self, kind: OpKind) {
@@ -2394,7 +2491,7 @@ impl Guppy {
             Some(Dialog::Search { cur, .. }) => *cur,
             _ => return,
         };
-        self.search_ctx = self.search_hits.get(cur).map(|h| guppy_core::search::context(&h.path, h.line, 3)).unwrap_or_default();
+        self.search_ctx = self.search_hits.get(cur).filter(|h| h.line > 0).map(|h| guppy_core::search::context(&h.path, h.line, 3)).unwrap_or_default();
     }
 
     fn on_search_key(&mut self, key: Key, typed: Option<&str>) {
@@ -3605,7 +3702,7 @@ impl Guppy {
                     list = list.push(
                         container(
                             row![
-                                container(text(format!("{rel}:{}", h.line)).size(12).color(if on { c } else { rgb(t.accent) }).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(2)).clip(true),
+                                container(text(if h.line > 0 { format!("{rel}:{}", h.line) } else { rel.to_string() }).size(12).color(if on { c } else { rgb(t.accent) }).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(2)).clip(true),
                                 container(text(h.text.clone()).size(12).color(c).wrapping(iced::widget::text::Wrapping::None)).width(Length::FillPortion(3)).clip(true),
                             ]
                             .spacing(12),
@@ -4387,7 +4484,8 @@ impl Guppy {
                 );
             }
             // A folder that would take the dragged files.
-            let drop_here = self.drag.as_ref().is_some_and(|d| d.active && d.over == Some((side, i)) && e.is_dir() && !d.paths.contains(&e.path));
+            let drop_here = self.drag.as_ref().is_some_and(|d| d.active && d.over == Some((side, i)) && e.is_dir() && !d.paths.contains(&e.path))
+                || (self.ext_over == Some((side, i)) && e.is_dir());
             let glow = self.glow.iter().filter(|(p, _)| *p == e.path).map(|(_, t)| Self::progress(*t, GLOW)).fold(None, |a: Option<f32>, x| Some(a.map_or(x, |a| a.min(x))));
             let bg = if on_cursor {
                 Some(rgb(t.accent))
@@ -4399,7 +4497,9 @@ impl Guppy {
             } else {
                 None
             };
-            let border = if drop_here { Border { color: rgb(t.accent), width: 1.5, radius: row_radius.into() } } else { Border::default().rounded(row_radius) };
+            // On the cursor row (accent background) the outline takes the text color instead.
+            let outline = if on_cursor { fg } else { rgb(t.accent) };
+            let border = if drop_here { Border { color: outline, width: 1.5, radius: row_radius.into() } } else { Border::default().rounded(row_radius) };
             let area = mouse_area(
                 container(line)
                     .height(ROW_H)
