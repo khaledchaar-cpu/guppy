@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0] - 2026-10-21
+
+### Added
+- Drag and drop on Wayland, both ways. Drop files from other apps onto Guppy and they go
+  into the folder under the pointer; the target row stays outlined while you hover. Drag a
+  row out of the window to hand the files to another app. Set `GUPPY_DND_DEBUG=1` to log
+  the drag events if something doesn't arrive.
+- Ctrl+F with `*` or `?` in the search text looks for file and folder names instead of
+  file contents: `*.png` lists every PNG below the current folder, each with its path.
+
+### Changed
+- On Linux the window has the class / app id `guppy`, so window manager rules can match it
+  (for example i3's `for_window [class="guppy"]` or a Hyprland window rule).
+
 ## [0.4.1] - 2026-10-16
 
 ### Changed

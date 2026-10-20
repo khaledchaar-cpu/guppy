@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "guppy-app"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "clipboard-win",
  "dirs",
@@ -1286,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "guppy-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bzip2",
  "chrono",
